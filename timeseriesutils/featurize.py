@@ -63,8 +63,8 @@ def featurize_data(data, target_var=None, group_vars=[], features = [], h=None):
     # the last nan is for forecast date.
     if h is not None:
         assert target_var in data.columns
-        data['h_days_ahead_target'] = data.groupby('location')[target_var].shift(-h)
-        target_name = 'h_days_ahead_target'
+        target_name = f'{target_var}_lead_{str(h)}'
+        data[target_name] = data.groupby('location')[target_var].shift(-h)
     else:
         target_name = None
     
@@ -166,11 +166,15 @@ def rolling_mean(data, target_var, group_vars=[], feature_names=[],
     else:
         grouped_data = data
     
-    column_name = target_var + '_roll_mean_' + str(window_size)
-    feature_names.append(column_name)
-    data[column_name] = grouped_data.rolling(window_size)[target_var] \
-        .mean() \
-        .values
+    if not isinstance(window_size, list):
+        window_size = [window_size]
+    
+    for w in window_size:
+        column_name = f'{target_var}_rollmean_w{str(w)}'
+        feature_names.append(column_name)
+        data[column_name] = grouped_data.rolling(w)[target_var] \
+            .mean() \
+            .values
     
     return data, feature_names
 
@@ -216,7 +220,7 @@ def lagged_values(data, target_var, group_vars=[], feature_names=[],
         lags = [l for l in range(1, window_size + 1)]
     
     for lag in lags:
-        feat_name = target_var + '_lag_' + str(lag)
+        feat_name = f'{target_var}_lag_{str(lag)}'
         data[feat_name] = grouped_data[target_var].shift(lag)
         feature_names.append(feat_name)
     
@@ -244,8 +248,7 @@ def windowed_taylor_coefs_one_grp(data,
     taylor_degree: integer
         degree of the Taylor polynomial
     window_size: integer
-        Time window to calculate lagged values for. All lags from 1 to
-        `window_size` are calculated. Ignored if `lags` is not `None`.
+        Time window to use for calculating Taylor polynomials.
     window_align: string
         alignment of window; either 'centered' or 'trailing'
     ew_span: integer or `None`
@@ -323,7 +326,7 @@ def windowed_taylor_coefs_one_grp(data,
                                                 rcond=None)[0]
     
     for d in range(taylor_degree + 1):
-        result[target_var + '_taylor_' + str(d)] = beta_hat[d, :]
+        result[f'{target_var}_taylor_d{str(d)}_w{str(window_size)}'] = beta_hat[d, :]
     
     result = result.drop(shift_varnames, axis=1)
     
@@ -332,8 +335,8 @@ def windowed_taylor_coefs_one_grp(data,
 
 def windowed_taylor_coefs(data,
                           target_var,
-                          group_vars=[],
-                          feature_names=[],
+                          group_vars=None,
+                          feature_names=None,
                           taylor_degree=1,
                           window_size=21,
                           window_align='centered',
@@ -356,9 +359,8 @@ def windowed_taylor_coefs(data,
         Running list of feature column names
     taylor_degree: integer
         degree of the Taylor polynomial
-    window_size: integer
-        Time window to calculate lagged values for. All lags from 1 to
-        `window_size` are calculated. Ignored if `lags` is not `None`.
+    window_size: list of integers
+        Size of time windows used for calculating Taylor coefficients
     window_align: string
         alignment of window; either 'centered' or 'trailing'
     ew_span: integer or `None`
@@ -378,28 +380,35 @@ def windowed_taylor_coefs(data,
         Taylor polynomial coefficients. New column names are of the form
         `target_var + '_taylor_' + d` for each degree d in 0, ..., taylor_degree
     '''
-    if group_vars == list() or group_vars is None:
-        data = windowed_taylor_coefs_one_grp(data,
-                                             target_var=target_var,
-                                             taylor_degree=taylor_degree,
-                                             window_size=window_size,
-                                             window_align=window_align,
-                                             ew_span=ew_span,
-                                             fill_edges=fill_edges)
-    else:
-        data = data.groupby(group_vars, as_index=False) \
-            .apply(windowed_taylor_coefs_one_grp,
-                target_var=target_var,
-                taylor_degree=taylor_degree,
-                window_size=window_size,
-                window_align=window_align,
-                ew_span=ew_span,
-                fill_edges=fill_edges) \
-            .reset_index(drop=True)
+    if not isinstance(window_size, list):
+        window_size = [window_size]
     
-    feat_names = [target_var + '_taylor_' + str(d) \
-                    for d in range(taylor_degree + 1)]
-    feature_names.append(feat_names)
+    if feature_names is None:
+        feature_names = [];
+    
+    for w in window_size:
+        if group_vars == list() or group_vars is None:
+            data = windowed_taylor_coefs_one_grp(data,
+                                                target_var=target_var,
+                                                taylor_degree=taylor_degree,
+                                                window_size=w,
+                                                window_align=window_align,
+                                                ew_span=ew_span,
+                                                fill_edges=fill_edges)
+        else:
+            data = data.groupby(group_vars, as_index=False) \
+                .apply(windowed_taylor_coefs_one_grp,
+                    target_var=target_var,
+                    taylor_degree=taylor_degree,
+                    window_size=w,
+                    window_align=window_align,
+                    ew_span=ew_span,
+                    fill_edges=fill_edges) \
+                .reset_index(drop=True)
+        
+        feat_names = [f'{target_var}_taylor_d{str(d)}_w{str(w)}' \
+                        for d in range(taylor_degree + 1)]
+        feature_names = feature_names + feat_names
     
     return data, feature_names
 
