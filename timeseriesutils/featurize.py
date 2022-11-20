@@ -4,10 +4,10 @@ import numpy as np
 import pandas as pd
 
 
-def featurize_data(data, target_var=None, group_vars=[], features = [], h=None):
+def featurize_data(data, group_vars=[], features = []):
     """
-    Augment a data frame with new columns containing values of features x and
-    responses y for a forecasting problem.
+    Augment a data frame with new columns containing values of features
+    calculated based on existing columns.
 
     Parameters
     ----------
@@ -16,17 +16,14 @@ def featurize_data(data, target_var=None, group_vars=[], features = [], h=None):
         separate series per location) and a column with the target variable to
         summarize. This data frame needs to be sorted by the grouping and time
         variables in ascending order.
-    target_var: string
-        Name of the column in the data frame with the forecast target variable.
     group_vars: list of strings
-        Names of columns in the data frame to group by.
-    h: integer
-        Forecast horizon. Default to None.
+        Names of columns in the data frame to group by. Grouping is done before
+        calculating features.
     features: list of dictionaries
         List of features to calculate. Each dictionary should have a `fun` key
         with feature function name and an `args` key with parameter name and
         values of this function. Available feature functions are
-        'rolling_mean', 'lagged_values', and 'windowed_taylor_coefs'.
+        'rollmean', 'lag', and 'windowed_taylor_coefs'.
     
     Returns
     -------
@@ -34,41 +31,29 @@ def featurize_data(data, target_var=None, group_vars=[], features = [], h=None):
         The original `data` with new columns containing feature values and/or
         forecasting target values
     feature_names: list of strings
-        List of feature column names
-    target_name: string
-        Forecast target column name
-    x_train_val: 3D tensor with shape (L, T, P)
-        L is the number of location l and T is the number of time point t for which
-        the full feature vector x_{l,t}, possibly including lagged covariate values,
-        and the response y_{l,t}, corresponding to the target variable at time t+h,
-        could be calculated. P is number of features.
-        Each row is a vector x_{l,t} = [x_{l,t,1},...,x_{l,t,P}] of features for some pair
-        (l, t) in the training set.
-    y_train_val: 2D tensor with with shape (L, T)
-        Each value is a forecast target variable value in the training set.
-        y_{l, t} = z_{l, 1, t+h}
-    x_T: 3D tensor with shape (L, T = 1, P)
-        Each value is test set feature for each location at forecast date.
+        List of feature column names that were created
     """
     # calculate features based on given parameters
     # and collect a list of feature names
     feature_names = list()
     for feature in features:
+        args = feature['args']
+        args['group_vars'] = group_vars
         data, feature_names = data.pipe(eval(feature['fun']),
                                         feature_names=feature_names,
-                                        **feature['args'])
+                                        **args)
     
-    # create a column for h horizon ahead target for observed values.
-    # for each location, this column has h nans in the end.
-    # the last nan is for forecast date.
-    if h is not None:
-        assert target_var in data.columns
-        target_name = f'{target_var}_lead_{str(h)}'
-        data[target_name] = data.groupby('location')[target_var].shift(-h)
-    else:
-        target_name = None
+    # # create a column for h horizon ahead target for observed values.
+    # # for each location, this column has h nans in the end.
+    # # the last nan is for forecast date.
+    # if h is not None:
+    #     assert target_var in data.columns
+    #     target_name = f'{target_var}_lead_{str(h)}'
+    #     data[target_name] = data.groupby('location')[target_var].shift(-h)
+    # else:
+    #     target_name = None
     
-    return data, feature_names, target_name
+    return data, feature_names
 
 
 def df_to_train_test_matrices(data, feature_names, target_name):
@@ -132,7 +117,7 @@ def df_to_train_test_matrices(data, feature_names, target_name):
     return x_train_val, y_train_val, x_T
 
 
-def rolling_mean(data, target_var, group_vars=[], feature_names=[],
+def rollmean(data, target_var, group_vars=[], feature_names=[],
                  window_size = 7):
     """
     Calculate moving average of target variable and store result in a new column
@@ -183,7 +168,7 @@ def rolling_mean(data, target_var, group_vars=[], feature_names=[],
     return data, feature_names
 
 
-def lagged_values(data, target_var, group_vars=[], feature_names=[],
+def lag(data, target_var, group_vars=[], feature_names=[],
                   window_size=1, lags=None):
     """
     Calculate lagged values of target variables and store results in new columns
