@@ -1,10 +1,11 @@
+from itertools import product
 import math
 from tokenize import group
 import numpy as np
 import pandas as pd
 
 
-def featurize_data(data, group_vars=[], features = []):
+def featurize_data(data, group_columns=None, features = []):
     """
     Augment a data frame with new columns containing values of features
     calculated based on existing columns.
@@ -16,7 +17,7 @@ def featurize_data(data, group_vars=[], features = []):
         separate series per location) and a column with the target variable to
         summarize. This data frame needs to be sorted by the grouping and time
         variables in ascending order.
-    group_vars: list of strings
+    group_columns: list of strings or `None`
         Names of columns in the data frame to group by. Grouping is done before
         calculating features.
     features: list of dictionaries
@@ -38,20 +39,10 @@ def featurize_data(data, group_vars=[], features = []):
     feature_names = list()
     for feature in features:
         args = feature['args']
-        args['group_vars'] = group_vars
+        args['group_columns'] = group_columns
         data, feature_names = data.pipe(eval(feature['fun']),
                                         feature_names=feature_names,
                                         **args)
-    
-    # # create a column for h horizon ahead target for observed values.
-    # # for each location, this column has h nans in the end.
-    # # the last nan is for forecast date.
-    # if h is not None:
-    #     assert target_var in data.columns
-    #     target_name = f'{target_var}_lead_{str(h)}'
-    #     data[target_name] = data.groupby('location')[target_var].shift(-h)
-    # else:
-    #     target_name = None
     
     return data, feature_names
 
@@ -102,12 +93,20 @@ def df_to_train_test_matrices(data, feature_names, target_name):
     train_val = data.dropna()
     
     # reformat selected features
-    x_train_val = train_val.pivot(index = 'location', columns = 'date', values = feature_names).to_numpy()
+    x_train_val = train_val \
+        .pivot(index = 'location', columns = 'date', values = feature_names) \
+        .to_numpy()
     # shape is (L, T, P)
-    x_train_val = x_train_val.reshape((x_train_val.shape[0], x_train_val.shape[1]//len(feature_names), len(feature_names)),order='F')
+    x_train_val = x_train_val \
+        .reshape((x_train_val.shape[0],
+                    x_train_val.shape[1]//len(feature_names),
+                    len(feature_names)),
+                 order='F')
     
     # shape is (L, T, P)
-    y_train_val = train_val.pivot(index = 'location', columns = 'date', values = target_name).to_numpy()
+    y_train_val = train_val \
+        .pivot(index = 'location', columns = 'date', values = target_name) \
+        .to_numpy()
     
     # convert everything to tensor
     x_train_val = tf.constant(x_train_val.astype('float64'))
@@ -117,10 +116,11 @@ def df_to_train_test_matrices(data, feature_names, target_name):
     return x_train_val, y_train_val, x_T
 
 
-def rollmean(data, target_var, group_vars=[], feature_names=[],
-                 window_size = 7):
+def rollmean(data, columns, group_columns=None, feature_names=None,
+                window_size=7):
     """
-    Calculate moving average of target variable and store result in a new column
+    Calculate moving average of specified variables and store results in new
+    columns
     
     Parameters
     ----------
@@ -129,46 +129,49 @@ def rollmean(data, target_var, group_vars=[], feature_names=[],
         separate series per location) and a column with the target variable to
         summarize. This data frame needs to be sorted by the grouping and time
         variables in ascending order.
-    target_var: string or list of strings
-        Name of column(s) in the data frame with the target variable(s)
-    group_vars: list of strings
+    columns: string or list of strings
+        Name of column(s) in the data frame with the variable(s) to featurize
+    group_columns: list of strings or None
         Names of columns in the data frame to group by.
-    feature_names: list of strings
+    feature_names: list of strings or None
         Running list of feature column names
-    window_size: integer
+    window_size: integer or list of integers
         Size of the sliding window over which we calculate moving average
     
     Returns
     -------
     data: data frame
         Original data frame with an additional column for the moving average,
-        named `target_var + '_roll_mean_' + window_size`
+        named `f'{c}_roll_mean_{window_size}'` where `c` is an element of
+        `columns`
     feature_names: list of strings
         Running list of feature column names, updated with the new column name
     """
-    if group_vars is not None and len(group_vars) > 0:
-        grouped_data = data.groupby(group_vars, as_index=False)
+    if group_columns is not None and len(group_columns) > 0:
+        grouped_data = data.groupby(group_columns, as_index=False)
     else:
         grouped_data = data
     
-    if not isinstance(target_var, list):
-        target_var = [target_var]
+    if feature_names is None:
+        feature_names = [];
+    
+    if not isinstance(columns, list):
+        columns = [columns]
     
     if not isinstance(window_size, list):
         window_size = [window_size]
     
-    for tv in target_var:
-        for w in window_size:
-            column_name = f'{tv}_rollmean_w{str(w)}'
-            feature_names.append(column_name)
-            data[column_name] = grouped_data.rolling(w)[tv] \
-                .mean() \
-                .values
+    for c, w in product(columns, window_size):
+        column_name = f'{c}_rollmean_w{str(w)}'
+        feature_names.append(column_name)
+        data[column_name] = grouped_data.rolling(w)[c] \
+            .mean() \
+            .values
     
     return data, feature_names
 
 
-def lag(data, target_var, group_vars=[], feature_names=[],
+def lag(data, columns, group_columns=None, feature_names=None,
                   window_size=1, lags=None):
     """
     Calculate lagged values of target variables and store results in new columns
@@ -180,11 +183,11 @@ def lag(data, target_var, group_vars=[], feature_names=[],
         separate series per location) and a column with the response variable to
         summarize. This data frame needs to be sorted by the grouping and time
         variables in ascending order.
-    target_var: string or list of strings
-        Name of column(s) in the data frame with the target variable(s)
-    group_vars: list of strings
+    columns: string or list of strings
+        Name of column(s) in the data frame with the variable(s) to featurize
+    group_columns: list of strings or None
         Names of columns in the data frame to group by.
-    feature_names: list of strings
+    feature_names: list of strings or None
         Running list of feature column names
     window_size: integer
         Time window to calculate lagged values for. All lags from 1 to
@@ -196,48 +199,125 @@ def lag(data, target_var, group_vars=[], feature_names=[],
     -------
     data: data frame
         Original data frame with additional columns for lagged values, named
-        `target_var + '_lag' + lag`
+        `f'{c}_lag{lag}'` where `c` is an element of `columns` and `lag` is an
+        element of `lags` if `lags` was provided or `[1, ..., window_size]`
+        otherwise.
     feature_names: list of strings
         Running list of feature column names, updated with the new column names
     """
-    if group_vars is not None and len(group_vars) > 0:
-        grouped_data = data.groupby(group_vars)
+    if group_columns is not None and len(group_columns) > 0:
+        grouped_data = data.groupby(group_columns)
     else:
         grouped_data = data
     
-    if not isinstance(target_var, list):
-        target_var = [target_var]
+    if feature_names is None:
+        feature_names = [];
+    
+    if not isinstance(columns, list):
+        columns = [columns]
     
     if lags is None:
         lags = [l for l in range(1, window_size + 1)]
     
-    for tv in target_var:
-        for lag in lags:
-            feat_name = f'{tv}_lag{str(lag)}'
-            data[feat_name] = grouped_data[tv].shift(lag)
-            feature_names.append(feat_name)
+    for c, lag in product(columns, lags):
+        feat_name = f'{c}_lag{str(lag)}'
+        data[feat_name] = grouped_data[c].shift(lag)
+        feature_names.append(feat_name)
     
     return data, feature_names
 
 
-def windowed_taylor_coefs_one_grp(data,
-                                  target_var,
-                                  taylor_degree=1,
-                                  window_size=21,
-                                  window_align='centered',
-                                  ew_span=None,
-                                  fill_edges=True):
+def horizon_targets(data, columns, group_columns=None, feature_names=None,
+                    horizons=1, layout='long'):
+    """
+    Calculate lagged values of target variables and store results in new columns
+    
+    Parameters
+    ----------
+    data: data frame
+        It has columns identifying groups of observations (e.g., locations with
+        separate series per location) and a column with the response variable to
+        summarize. This data frame needs to be sorted by the grouping and time
+        variables in ascending order.
+    columns: string or list of strings
+        Name of column(s) in the data frame with the variable(s) to featurize
+    group_columns: list of strings or None
+        Names of columns in the data frame to group by.
+    feature_names: list of strings or None
+        Running list of feature column names
+    horizons: list of integers
+        List of look-ahead forecast horizons to use.
+    layout: string
+        Orientation of results: 'long' (the default) results in a data frame
+        with columns `horizon` and `f'{c}_target'` for each column `c` in
+        `columns`, and number of rows equal to
+        `len(horizons) * (number of rows in input data)`. A 'wide'
+        orientation augments the input `data` with new columns named
+        `f'{c}_target{h}'` for each column `c` in `columns` and horizon `h` in
+        `horizons`.
+    
+    Returns
+    -------
+    data: data frame
+        Original data frame with additional columns for leading values and
+        possibly for the horizon; see documentation for the `layout` argument.
+    feature_names: list of strings
+        Running list of feature column names, updated with new features names.
+        If the `layout` is `'long'`, there is one new feature: `'horizon'`.
+        If the `layout` is `'wide'`, there are no new features.
+    """
+    if group_columns is not None and len(group_columns) > 0:
+        grouped_data = data.groupby(group_columns)
+    else:
+        grouped_data = data
+    
+    if feature_names is None:
+        feature_names = [];
+    
+    if not isinstance(horizons, list):
+        horizons = [horizons]
+    
+    if not isinstance(columns, list):
+        columns = [columns]
+    
+    if layout == 'long':
+        def add_one_horizon(h):
+            data_h = data.copy()
+            for c in columns:
+                data_h[f'{c}_target'] = grouped_data[c].shift(-h)
+                data_h['horizon'] = h
+            return(data_h)
+        
+        data = pd.concat([add_one_horizon(h) for h in horizons], axis=0)
+        feature_names = feature_names + ['horizon']
+    else:
+        for c, h in product(columns, horizons):
+            data[f'{c}_target{str(h)}'] = grouped_data[c].shift(-h)
+    
+    return data, feature_names
+
+
+def taylor_coefs_one_column_grp(data,
+                                c,
+                                taylor_degree=1,
+                                window_size=21,
+                                window_align='centered',
+                                ew_span=None,
+                                fill_edges=True):
     '''
     Estimate the parameters of a Taylor polynomial fit to a rolling
     trailing window, with the coefficients in consecutive windows
-    updated according to a Taylor process with noise.
+    updated according to a Taylor process with noise. This function is for
+    internal use only, and expects the input `data` to have only one group,
+    and works for a single column `c`, `window_size`, `window_span`, and
+    `ew_span`.
     
     Parameters
     ----------
     data: a pandas data frame
         Data fram with data for one group unit (e.g., one location)
-    target_var: string
-        Name of the column in the data frame with the forecast target variable.
+    c: string
+        Name of the column in the data frame with the variable to featurize.
     taylor_degree: integer
         degree of the Taylor polynomial
     window_size: integer
@@ -259,7 +339,8 @@ def windowed_taylor_coefs_one_grp(data,
     data: data frame
         A copy of the data frame with additional columns containing estimated
         Taylor polynomial coefficients. New column names are of the form
-        `target_var + '_taylor_' + d` for each degree d in 0, ..., taylor_degree
+        `f'{c}_taylor{d}_w{window_size}_a{window_align}_s{ew_span}'` for each
+        degree `d` in `0, ..., taylor_degree`
     '''
     result = data.copy()
     if window_align == 'centered':
@@ -271,12 +352,12 @@ def windowed_taylor_coefs_one_grp(data,
     shift_varnames = []
     for l in window_lags:
         if l < 0:
-            shift_varname = target_var + '_m' + str(abs(l))
+            shift_varname = c + '_m' + str(abs(l))
         else:
-            shift_varname = target_var + '_p' + str(abs(l))
+            shift_varname = c + '_p' + str(abs(l))
         
         shift_varnames.append(shift_varname)
-        result[shift_varname] = result[[target_var]].shift(-l)
+        result[shift_varname] = result[[c]].shift(-l)
     
     taylor_X = np.concatenate(
         [np.ones((window_size, 1))] + \
@@ -319,7 +400,9 @@ def windowed_taylor_coefs_one_grp(data,
                                                 rcond=None)[0]
     
     for d in range(taylor_degree + 1):
-        result[f'{target_var}_taylor_d{str(d)}_w{str(window_size)}'] = beta_hat[d, :]
+        fname = f'{c}_taylor_d{str(d)}_w{str(window_size)}{window_align[0]}' + \
+            f'_s{str(ew_span)}'
+        result[fname] = beta_hat[d, :]
     
     result = result.drop(shift_varnames, axis=1)
     
@@ -327,8 +410,8 @@ def windowed_taylor_coefs_one_grp(data,
 
 
 def windowed_taylor_coefs(data,
-                          target_var,
-                          group_vars=None,
+                          columns,
+                          group_columns=None,
                           feature_names=None,
                           taylor_degree=1,
                           window_size=21,
@@ -344,9 +427,9 @@ def windowed_taylor_coefs(data,
     ----------
     data: a pandas data frame
         Data fram with data for one group unit (e.g., one location)
-    target_var: string or list of strings
-        Name of column(s) in the data frame with the target variable(s)
-    group_vars: list of strings
+    columns: string or list of strings
+        Name of column(s) in the data frame with the variable(s) to featurize
+    group_columns: list of strings
         Names of columns in the data frame to group by.
     feature_names: list of strings
         Running list of feature column names
@@ -371,41 +454,48 @@ def windowed_taylor_coefs(data,
     data: data frame
         A copy of the data frame with additional columns containing estimated
         Taylor polynomial coefficients. New column names are of the form
-        `target_var + '_taylor_' + d` for each degree d in 0, ..., taylor_degree
+        `f'{c}_taylor_d{str(d)}_w{str(window_size)}{window_align[0]}' +
+            f'_s{str(ew_span)` for each degree d in 0, ..., taylor_degree
     '''
-    if not isinstance(target_var, list):
-        target_var = [target_var]
+    if not isinstance(columns, list):
+        columns = [columns]
     
     if not isinstance(window_size, list):
         window_size = [window_size]
     
+    if not isinstance(window_align, list):
+        window_align = [window_align]
+    
+    if not isinstance(ew_span, list):
+        ew_span = [ew_span]
+    
     if feature_names is None:
         feature_names = [];
     
-    for tv in target_var:
-        for w in window_size:
-            if group_vars == list() or group_vars is None:
-                data = windowed_taylor_coefs_one_grp(data,
-                                                     target_var=tv,
-                                                     taylor_degree=taylor_degree,
-                                                     window_size=w,
-                                                     window_align=window_align,
-                                                     ew_span=ew_span,
-                                                     fill_edges=fill_edges)
-            else:
-                data = data.groupby(group_vars, as_index=False) \
-                    .apply(windowed_taylor_coefs_one_grp,
-                           target_var=tv,
-                           taylor_degree=taylor_degree,
-                           window_size=w,
-                           window_align=window_align,
-                           ew_span=ew_span,
-                           fill_edges=fill_edges) \
-                    .reset_index(drop=True)
-            
-            feat_names = [f'{tv}_taylor_d{str(d)}_w{str(w)}' \
-                            for d in range(taylor_degree + 1)]
-            feature_names = feature_names + feat_names
+    for (c, w, a, s) in product(columns, window_size, window_align, ew_span):
+        if group_columns == list() or group_columns is None:
+            data = taylor_coefs_one_column_grp(data,
+                                                c=c,
+                                                taylor_degree=taylor_degree,
+                                                window_size=w,
+                                                window_align=a,
+                                                ew_span=s,
+                                                fill_edges=fill_edges)
+        else:
+            data = data.groupby(group_columns, as_index=False) \
+                .apply(taylor_coefs_one_column_grp,
+                        c=c,
+                        taylor_degree=taylor_degree,
+                        window_size=w,
+                        window_align=a,
+                        ew_span=s,
+                        fill_edges=fill_edges) \
+                .reset_index(drop=True)
+        
+        feat_names = [
+            f'{c}_taylor_d{str(d)}_w{str(w) + a[0]}_s{str(s)}'
+            for d in range(taylor_degree + 1)]
+        feature_names = feature_names + feat_names
     
     return data, feature_names
 
