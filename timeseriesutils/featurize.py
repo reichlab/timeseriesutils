@@ -1,9 +1,8 @@
 from itertools import product
 import math
-from tokenize import group
 import numpy as np
 import pandas as pd
-
+from scipy.signal import periodogram
 
 def featurize_data(data, group_columns=None, features = []):
     """
@@ -40,7 +39,10 @@ def featurize_data(data, group_columns=None, features = []):
     for feature in features:
         args = feature['args']
         args['group_columns'] = group_columns
-        data, feature_names = data.pipe(eval(feature['fun']),
+        fun = feature['fun']
+        if type(fun) == str:
+            fun = eval(fun)
+        data, feature_names = data.pipe(fun,
                                         feature_names=feature_names,
                                         **args)
     
@@ -117,7 +119,7 @@ def df_to_train_test_matrices(data, feature_names, target_name):
 
 
 def rollmean(data, columns, group_columns=None, feature_names=None,
-                window_size=7):
+                window_size=7, min_periods=None):
     """
     Calculate moving average of specified variables and store results in new
     columns
@@ -137,6 +139,9 @@ def rollmean(data, columns, group_columns=None, feature_names=None,
         Running list of feature column names
     window_size: integer or list of integers
         Size of the sliding window over which we calculate moving average
+    min_periods: integer or None
+        Minimum number of observations in window required to have a value;
+        otherwise, result is `np.nan`.
     
     Returns
     -------
@@ -164,7 +169,7 @@ def rollmean(data, columns, group_columns=None, feature_names=None,
     for c, w in product(columns, window_size):
         column_name = f'{c}_rollmean_w{str(w)}'
         feature_names.append(column_name)
-        data[column_name] = grouped_data.rolling(w)[c] \
+        data[column_name] = grouped_data.rolling(w, min_periods=min_periods)[c] \
             .mean() \
             .values
     
@@ -499,3 +504,172 @@ def windowed_taylor_coefs(data,
     
     return data, feature_names
 
+
+def domfreq_one_window(x, c, w, a, n_domfreq = 5, fs = 1.0, detrend = 'linear'):
+    '''
+    Calculate features based on power spectral density:
+    dominant frequencies and power at dominant frequencies
+    
+    Parameters
+    ----------
+    x: numeric vector
+        data values in one window
+    c: string
+        Name of the column in the data frame with the variable to featurize.
+    w: integer
+        Window size
+    a: string
+        Window alignment
+    n_domfreq: integer
+        The number of dominant frequencies to calculate. Defaults to 5.
+    fs: float
+        Sampling frequency of the x time series. See scipy.signal.periodogram.
+        Defaults to 1.0.
+    detrend: string or function
+        Specifies how to detrend each segment. See scipy.signal.periodogram.
+        Defaults to 'linear'.
+    '''
+    freq, psd = periodogram(x[c].values, fs = fs, detrend = detrend)
+    
+    domfreq_inds = np.argpartition(-psd, n_domfreq)[:n_domfreq]
+    domfreq_pows = psd[domfreq_inds]
+    domfreq_pows_order = np.argsort(-domfreq_pows)
+    domfreq_pows = domfreq_pows[domfreq_pows_order]
+    
+    domfreq_inds = domfreq_inds[domfreq_pows_order]
+    domfreqs = freq[domfreq_inds]
+    
+    return {f'{c}_domfreq{str(i+1)}_w{str(w)}{a[0]}': domfreqs[i] for i in range(n_domfreq)} | \
+        {f'{c}_domfreq{str(i+1)}_logpow_w{str(w)}{a[0]}': np.log(domfreq_pows[i]) for i in range(n_domfreq)}
+
+
+def domfreq_one_column_grp(data,
+                           c,
+                           window_size,
+                           window_align,
+                           n_domfreq,
+                           fs,
+                           detrend):
+    '''
+    Returns
+    -------
+    data: data frame
+        A copy of the data frame with additional columns containing estimated
+        dominant frequency features. New column names are of the form
+        `f'{c}_domfreq{str(i)}_w{str(window_size)}{window_align[0]}' and
+        `f'{c}_domfreq{str(i)}_logpow_w{str(window_size)}{window_align[0]}'
+        for each index i in 1, ..., n_domfreq
+    '''
+    if window_align == 'centered':
+        center = True
+        hw = window_size // 2
+        ext_data = pd.concat((
+            data.iloc[:hw, :],
+            data,
+            data.iloc[-hw:, :]
+        ), axis = 0)
+    elif window_align == 'trailing':
+        center = False
+        ext_data = pd.concat((
+            data.iloc[:window_size, :],
+            data
+        ), axis = 0)
+    else:
+        raise ValueError("window_align must be 'centered' or 'trailing'")
+    
+    feats_df = pd.DataFrame.from_records([
+        domfreq_one_window(x=df_, c=c, w=window_size, a=window_align,
+                           n_domfreq=n_domfreq, fs=fs, detrend=detrend) \
+            for df_ in ext_data.rolling(window_size, center=center)])
+    
+    if window_align == 'centered':
+        feats_df = feats_df.iloc[hw:(-hw), :]
+    elif window_align == 'trailing':
+        feats_df = feats_df.iloc[window_size:, :]
+    
+    return data.join(feats_df.set_index(keys=data.index))
+
+
+def domfreq(data,
+            columns,
+            group_columns=None,
+            feature_names=None,
+            window_size=21,
+            window_align='centered',
+            n_domfreq = 5,
+            fs = 1.0,
+            detrend = 'linear'):
+    '''
+    Dominant frequencies and power at dominant frequencies of a signal.
+    
+    Parameters
+    ----------
+    data: a pandas data frame
+        Data fram with data for one group unit (e.g., one location)
+    columns: string or list of strings
+        Name of column(s) in the data frame with the variable(s) to featurize
+    group_columns: list of strings
+        Names of columns in the data frame to group by.
+    feature_names: list of strings
+        Running list of feature column names
+    window_size: list of integers
+        Size of time windows used for calculating power spectral density
+    window_align: string
+        alignment of window; either 'centered' or 'trailing'
+    n_domfreq: integer
+        The number of dominant frequencies to calculate. Defaults to 5.
+    fs: float
+        Sampling frequency of the x time series. See scipy.signal.periodogram.
+        Defaults to 1.0.
+    detrend: string or function
+        Specifies how to detrend each segment. See scipy.signal.periodogram.
+        Defaults to 'linear'.
+    
+    Returns
+    -------
+    data: data frame
+        A copy of the data frame with additional columns containing estimated
+        dominant frequency features. New column names are of the form
+        `f'{c}_domfreq{str(i)}_w{str(window_size)}{window_align[0]}' and
+        `f'{c}_domfreq{str(i)}_logpow_w{str(window_size)}{window_align[0]}'
+        for each index i in 1, ..., n_domfreq
+    '''
+    if not isinstance(columns, list):
+        columns = [columns]
+    
+    if not isinstance(window_size, list):
+        window_size = [window_size]
+    
+    if not isinstance(window_align, list):
+        window_align = [window_align]
+    
+    if feature_names is None:
+        feature_names = [];
+    
+    for (c, w, a) in product(columns, window_size, window_align):
+        if group_columns == list() or group_columns is None:
+            data = domfreq_one_column_grp(data,
+                                          c=c,
+                                          window_size=w,
+                                          window_align=a,
+                                          n_domfreq=n_domfreq,
+                                          fs=fs,
+                                          detrend=detrend)
+        else:
+            data = data.groupby(group_columns, as_index=False) \
+                .apply(domfreq_one_column_grp,
+                       c=c,
+                       window_size=w,
+                       window_align=a,
+                       n_domfreq=n_domfreq,
+                       fs=fs,
+                       detrend=detrend) \
+                .reset_index(drop=True)
+        
+        feat_names = [f'{c}_domfreq{str(i+1)}_w{str(w)}{a[0]}' \
+                for i in range(n_domfreq)] + \
+            [f'{c}_domfreq{str(i+1)}_logpow_w{str(w)}{a[0]}' \
+                for i in range(n_domfreq)]
+        feature_names = feature_names + feat_names
+    
+    return data, feature_names
