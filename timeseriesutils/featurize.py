@@ -385,12 +385,19 @@ def taylor_coefs_one_column_grp(data,
         taylor_X = np.matmul(W, taylor_X)
         y = np.matmul(W, y)
     
-    beta_hat = np.linalg.lstsq(taylor_X, y, rcond=None)[0]
+    # compute coefficient estimates
+    beta_hat = np.full(shape=(taylor_X.shape[1], y.shape[1]),
+                       fill_value = np.nan)
     
-    # clean up beginning and end, where there was not enough data
-    # fit to sub-window with fully observed data
-    if fill_edges:
-        if window_align == 'centered':
+    if window_align == 'centered':
+        # fit to sub-window with fully observed data
+        beta_hat[:, half_window:-(half_window + 1)] = np.linalg.lstsq(
+            taylor_X,
+            y[:, half_window:-(half_window + 1)],
+            rcond=None)[0]
+        
+        # clean up beginning and end, where there was not enough data
+        if fill_edges:
             for i in range(half_window):
                 beta_hat[:, i] = np.linalg.lstsq(taylor_X[(half_window - i):, :],
                                                 y[(half_window - i):, i],
@@ -398,7 +405,15 @@ def taylor_coefs_one_column_grp(data,
                 beta_hat[:, -(i+1)] = np.linalg.lstsq(taylor_X[:(half_window + i + 1), :],
                                                     y[:(half_window + i + 1), -(i + 1)],
                                                     rcond=None)[0]
-        elif window_align == 'trailing':
+    elif window_align == 'trailing':
+        # fit to sub-window with fully observed data
+        beta_hat[:, window_size:] = np.linalg.lstsq(
+            taylor_X,
+            y[:, window_size:],
+            rcond=None)[0]
+        
+        # clean up beginning and end, where there was not enough data
+        if fill_edges:
             for i in range(window_size):
                 beta_hat[:, i] = np.linalg.lstsq(taylor_X[(window_size - i):, :],
                                                 y[(window_size - i):, i],
@@ -498,7 +513,7 @@ def windowed_taylor_coefs(data,
                 .reset_index(drop=True)
         
         feat_names = [
-            f'{c}_taylor_d{str(d)}_w{str(w) + a[0]}_s{str(s)}'
+            f'{c}_taylor_d{str(taylor_degree)}_c{str(d)}_w{str(w) + a[0]}_s{str(s)}'
             for d in range(taylor_degree + 1)]
         feature_names = feature_names + feat_names
     

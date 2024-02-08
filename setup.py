@@ -3,7 +3,7 @@
 from distutils.core import setup
 
 setup(name='timeseriesutils',
-    version='0.0.1',
+    version='0.0.2',
     description='Utility functions for working with time series data in Python',
     author='Evan L. Ray, Serena Wang',
     author_email='elray@umass.edu',
