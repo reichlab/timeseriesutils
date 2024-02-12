@@ -420,7 +420,7 @@ def taylor_coefs_one_column_grp(data,
                                                 rcond=None)[0]
     
     for d in range(taylor_degree + 1):
-        fname = f'{c}_taylor_d{str(d)}_w{str(window_size)}{window_align[0]}' + \
+        fname = f'{c}_taylor_d{str(taylor_degree)}_c{str(d)}_w{str(window_size)}{window_align[0]}' + \
             f'_s{str(ew_span)}'
         result[fname] = beta_hat[d, :]
     
