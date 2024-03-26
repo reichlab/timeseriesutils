@@ -4,7 +4,7 @@ Utility functions for working with time series data in Python. Functionality is 
 
 ## Development environment
 
-The development environment can be set up using:
+We use [conda](https://conda.io/) for environment management and [PDM](https://pdm-project.org/) for dependency management. With these tools, the development environment can be set up using:
 
 ```
 conda create -n timeseriesutils python=3.11
