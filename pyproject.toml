@@ -1,0 +1,27 @@
+[project]
+name = "timeseriesutils"
+version = "0.0.4"
+description = "Utility functions for working with time series data in Python"
+authors = [
+    {name = "Evan L. Ray", email = "elray@umass.edu"},
+    {name = "Serena Wang"}
+]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>= 1.3.0",
+    "scipy>= 0.12.0"
+]
+requires-python = ">=3.9"
+readme = "README.md"
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+demo = [
+    "matplotlib>=3.8.2"
+]
+
+[tool.pdm]
+distribution = false
+
+[tool.pdm.dev-dependencies]
+test = ["pytest"]
