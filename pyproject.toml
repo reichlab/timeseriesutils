@@ -20,8 +20,9 @@ demo = [
     "matplotlib>=3.8.2"
 ]
 
-[tool.pdm]
-distribution = false
+[build-system]
+# Minimum requirements for the build system to execute.
+requires = ['setuptools', 'wheel']
 
 [tool.pdm.dev-dependencies]
 test = ["pytest"]
