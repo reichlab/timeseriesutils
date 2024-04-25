@@ -69,17 +69,17 @@ def df_to_train_test_matrices(data, feature_names, target_name):
     
     Returns
     -------
-    x_train_val: 3D tensor with shape (L, T, P)
+    x_train_val: 3D array with shape (L, T, P)
         L is the number of location l and T is the number of time point t for which
         the full feature vector x_{l,t}, possibly including lagged covariate values,
         and the response y_{l,t}, corresponding to the target variable at time t+h,
         could be calculated. P is number of features.
         Each row is a vector x_{l,t} = [x_{l,t,1},...,x_{l,t,P}] of features for some pair
         (l, t) in the training set.
-    y_train_val: 2D tensor with with shape (L, T)
+    y_train_val: 2D array with with shape (L, T)
         Each value is a forecast target variable value in the training set.
         y_{l, t} = z_{l, 1, t+h}
-    x_T: 3D tensor with shape (L, T = 1, P)
+    x_T: 3D array with shape (L, T = 1, P)
         Each value is test set feature for each location at forecast date.
     """
     # extract the largest date
@@ -109,11 +109,6 @@ def df_to_train_test_matrices(data, feature_names, target_name):
     y_train_val = train_val \
         .pivot(index = 'location', columns = 'date', values = target_name) \
         .to_numpy()
-    
-    # convert everything to tensor
-    x_train_val = tf.constant(x_train_val.astype('float64'))
-    y_train_val = tf.constant(y_train_val.astype('float64'))
-    x_T = tf.constant(x_T.astype('float64'))
     
     return x_train_val, y_train_val, x_T
 
