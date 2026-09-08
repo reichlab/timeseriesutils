@@ -498,7 +498,7 @@ def windowed_taylor_coefs(data,
                                                 ew_span=s,
                                                 fill_edges=fill_edges)
         else:
-            data = data.groupby(group_columns, as_index=False) \
+            data = data.groupby(group_columns, as_index=False)[data.columns.tolist()] \
                 .apply(taylor_coefs_one_column_grp,
                         c=c,
                         taylor_degree=taylor_degree,
@@ -667,7 +667,7 @@ def domfreq(data,
                                           fs=fs,
                                           detrend=detrend)
         else:
-            data = data.groupby(group_columns, as_index=False) \
+            data = data.groupby(group_columns, as_index=False)[data.columns.tolist()] \
                 .apply(domfreq_one_column_grp,
                        c=c,
                        window_size=w,
