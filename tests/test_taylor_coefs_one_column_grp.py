@@ -1,6 +1,7 @@
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
+
 from timeseriesutils.featurize import taylor_coefs_one_column_grp
 
 
