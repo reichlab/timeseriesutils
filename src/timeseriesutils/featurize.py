@@ -1,10 +1,12 @@
-from itertools import product
 import math
+from itertools import product
+
 import numpy as np
 import pandas as pd
 from scipy.signal import periodogram
 
-def featurize_data(data, group_columns=None, features = []):
+
+def featurize_data(data, group_columns=None, features = None):
     """
     Augment a data frame with new columns containing values of features
     calculated based on existing columns.
@@ -35,7 +37,9 @@ def featurize_data(data, group_columns=None, features = []):
     """
     # calculate features based on given parameters
     # and collect a list of feature names
-    feature_names = list()
+    if features is None:
+        features = []
+    feature_names = []
     for feature in features:
         args = feature['args']
         args['group_columns'] = group_columns
@@ -162,7 +166,7 @@ def rollmean(data, columns, group_columns=None, feature_names=None,
         window_size = [window_size]
     
     for c, w in product(columns, window_size):
-        column_name = f'{c}_rollmean_w{str(w)}'
+        column_name = f'{c}_rollmean_w{w!s}'
         feature_names.append(column_name)
         data[column_name] = grouped_data.rolling(w, min_periods=min_periods)[c] \
             .mean() \
@@ -220,7 +224,7 @@ def lag(data, columns, group_columns=None, feature_names=None,
         lags = [l for l in range(1, window_size + 1)]
     
     for c, lag in product(columns, lags):
-        feat_name = f'{c}_lag{str(lag)}'
+        feat_name = f'{c}_lag{lag!s}'
         data[feat_name] = grouped_data[c].shift(lag)
         feature_names.append(feat_name)
     
@@ -292,7 +296,7 @@ def horizon_targets(data, columns, group_columns=None, feature_names=None,
         feature_names = feature_names + ['horizon']
     else:
         for c, h in product(columns, horizons):
-            data[f'{c}_target{str(h)}'] = grouped_data[c].shift(-h)
+            data[f'{c}_target{h!s}'] = grouped_data[c].shift(-h)
     
     return data, feature_names
 
@@ -416,8 +420,8 @@ def taylor_coefs_one_column_grp(data,
                                                 rcond=None)[0]
     
     for d in range(taylor_degree + 1):
-        fname = f'{c}_taylor_d{str(taylor_degree)}_c{str(d)}_w{str(window_size)}{window_align[0]}' + \
-            f'_s{str(ew_span)}'
+        fname = f'{c}_taylor_d{taylor_degree!s}_c{d!s}_w{window_size!s}{window_align[0]}' + \
+            f'_s{ew_span!s}'
         result[fname] = beta_hat[d, :]
     
     result = result.drop(shift_varnames, axis=1)
@@ -489,7 +493,7 @@ def windowed_taylor_coefs(data,
         feature_names = [];
     
     for (c, w, a, s) in product(columns, window_size, window_align, ew_span):
-        if group_columns == list() or group_columns is None:
+        if group_columns == [] or group_columns is None:
             data = taylor_coefs_one_column_grp(data,
                                                 c=c,
                                                 taylor_degree=taylor_degree,
@@ -509,7 +513,7 @@ def windowed_taylor_coefs(data,
                 .reset_index(drop=True)
         
         feat_names = [
-            f'{c}_taylor_d{str(taylor_degree)}_c{str(d)}_w{str(w) + a[0]}_s{str(s)}'
+            f'{c}_taylor_d{taylor_degree!s}_c{d!s}_w{str(w) + a[0]}_s{s!s}'
             for d in range(taylor_degree + 1)]
         feature_names = feature_names + feat_names
     
@@ -550,8 +554,8 @@ def domfreq_one_window(x, c, w, a, n_domfreq = 5, fs = 1.0, detrend = 'linear'):
     domfreq_inds = domfreq_inds[domfreq_pows_order]
     domfreqs = freq[domfreq_inds]
     
-    return {f'{c}_domfreq{str(i+1)}_w{str(w)}{a[0]}': domfreqs[i] for i in range(n_domfreq)} | \
-        {f'{c}_domfreq{str(i+1)}_logpow_w{str(w)}{a[0]}': np.log(domfreq_pows[i]) for i in range(n_domfreq)}
+    return {f'{c}_domfreq{i+1!s}_w{w!s}{a[0]}': domfreqs[i] for i in range(n_domfreq)} | \
+        {f'{c}_domfreq{i+1!s}_logpow_w{w!s}{a[0]}': np.log(domfreq_pows[i]) for i in range(n_domfreq)}
 
 
 def domfreq_one_column_grp(data,
@@ -658,7 +662,7 @@ def domfreq(data,
         feature_names = [];
     
     for (c, w, a) in product(columns, window_size, window_align):
-        if group_columns == list() or group_columns is None:
+        if group_columns == [] or group_columns is None:
             data = domfreq_one_column_grp(data,
                                           c=c,
                                           window_size=w,
@@ -677,9 +681,9 @@ def domfreq(data,
                        detrend=detrend) \
                 .reset_index(drop=True)
         
-        feat_names = [f'{c}_domfreq{str(i+1)}_w{str(w)}{a[0]}' \
+        feat_names = [f'{c}_domfreq{i+1!s}_w{w!s}{a[0]}' \
                 for i in range(n_domfreq)] + \
-            [f'{c}_domfreq{str(i+1)}_logpow_w{str(w)}{a[0]}' \
+            [f'{c}_domfreq{i+1!s}_logpow_w{w!s}{a[0]}' \
                 for i in range(n_domfreq)]
         feature_names = feature_names + feat_names
     
